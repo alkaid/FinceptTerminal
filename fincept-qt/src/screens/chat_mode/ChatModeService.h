@@ -168,6 +168,8 @@ class ChatModeService : public QObject {
     explicit ChatModeService(QObject* parent = nullptr);
 
     QNetworkRequest build_request(const QString& path) const;
+    bool local_only_mode() const;
+    QString local_only_error() const;
     QString base_url() const;
     QString api_key() const;
     QString session_token() const;

@@ -17,8 +17,10 @@ class AuthManager : public QObject {
     const SessionData& session() const { return session_; }
     bool is_authenticated() const { return session_.authenticated; }
     bool is_loading() const { return is_loading_; }
+    bool is_local_only_mode() const;
 
     // Auth flows
+    void continue_as_guest();
     void login(const QString& email, const QString& password, bool force_login = false);
     void signup(const QString& username, const QString& email, const QString& password, const QString& phone,
                 const QString& country = {}, const QString& country_code = {});
@@ -75,6 +77,7 @@ class AuthManager : public QObject {
     void fetch_user_subscription(std::function<void()> on_done = {});
     void complete_auth_flow(std::function<void()> on_done);
     void auto_configure_fincept_llm();
+    void configure_local_guest_session();
     QString generate_device_id() const;
     QJsonObject unwrap_data(const QJsonObject& raw) const;
 

@@ -41,6 +41,14 @@ QString ChatModeService::session_token() const {
     return auth::AuthManager::instance().session().session_token;
 }
 
+bool ChatModeService::local_only_mode() const {
+    return auth::AuthManager::instance().is_local_only_mode();
+}
+
+QString ChatModeService::local_only_error() const {
+    return QStringLiteral("Fincept cloud chat is disabled in local-only mode");
+}
+
 QNetworkRequest ChatModeService::build_request(const QString& path) const {
     QNetworkRequest req{QUrl(base_url() + path)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
@@ -130,29 +138,57 @@ void ChatModeService::handle_reply(QNetworkReply* reply,
 // ── HTTP verbs ────────────────────────────────────────────────────────────────
 
 void ChatModeService::get(const QString& path, std::function<void(bool, QJsonDocument, QString)> cb) {
+    if (local_only_mode()) {
+        LOG_DEBUG("ChatModeService", "Local-only mode: skipped GET " + path);
+        cb(false, {}, local_only_error());
+        return;
+    }
     auto* reply = nam_->get(build_request(path));
     handle_reply(reply, std::move(cb));
 }
 
 void ChatModeService::post(const QString& path, const QJsonObject& body,
                            std::function<void(bool, QJsonDocument, QString)> cb) {
+    if (local_only_mode()) {
+        Q_UNUSED(body);
+        LOG_DEBUG("ChatModeService", "Local-only mode: skipped POST " + path);
+        cb(false, {}, local_only_error());
+        return;
+    }
     auto* reply = nam_->post(build_request(path), QJsonDocument(body).toJson(QJsonDocument::Compact));
     handle_reply(reply, std::move(cb));
 }
 
 void ChatModeService::put(const QString& path, const QJsonObject& body,
                           std::function<void(bool, QJsonDocument, QString)> cb) {
+    if (local_only_mode()) {
+        Q_UNUSED(body);
+        LOG_DEBUG("ChatModeService", "Local-only mode: skipped PUT " + path);
+        cb(false, {}, local_only_error());
+        return;
+    }
     auto* reply = nam_->put(build_request(path), QJsonDocument(body).toJson(QJsonDocument::Compact));
     handle_reply(reply, std::move(cb));
 }
 
 void ChatModeService::del(const QString& path, std::function<void(bool, QJsonDocument, QString)> cb) {
+    if (local_only_mode()) {
+        LOG_DEBUG("ChatModeService", "Local-only mode: skipped DELETE " + path);
+        cb(false, {}, local_only_error());
+        return;
+    }
     auto* reply = nam_->deleteResource(build_request(path));
     handle_reply(reply, std::move(cb));
 }
 
 void ChatModeService::del_with_body(const QString& path, const QJsonObject& body,
                                     std::function<void(bool, QJsonDocument, QString)> cb) {
+    if (local_only_mode()) {
+        Q_UNUSED(body);
+        LOG_DEBUG("ChatModeService", "Local-only mode: skipped DELETE " + path);
+        cb(false, {}, local_only_error());
+        return;
+    }
     QNetworkRequest req = build_request(path);
     auto* reply = nam_->sendCustomRequest(req, "DELETE", QJsonDocument(body).toJson(QJsonDocument::Compact));
     handle_reply(reply, std::move(cb));
@@ -161,6 +197,12 @@ void ChatModeService::del_with_body(const QString& path, const QJsonObject& body
 // ── Session CRUD ──────────────────────────────────────────────────────────────
 
 void ChatModeService::create_session(const QString& title, SessionCallback cb) {
+    if (local_only_mode()) {
+        Q_UNUSED(title);
+        cb(false, {}, local_only_error());
+        return;
+    }
+
     LOG_INFO("ChatModeService", QString("Creating session: \"%1\"").arg(title));
     QJsonObject body;
     body["title"] = title;
@@ -179,6 +221,11 @@ void ChatModeService::create_session(const QString& title, SessionCallback cb) {
 }
 
 void ChatModeService::list_sessions(SessionsCallback cb) {
+    if (local_only_mode()) {
+        cb(true, {}, {});
+        return;
+    }
+
     LOG_DEBUG("ChatModeService", "Listing sessions");
     get("/chat/sessions", [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
         if (!ok) {
@@ -233,6 +280,18 @@ void ChatModeService::activate_session(const QString& uuid, VoidCallback cb) {
 void ChatModeService::save_message(const QString& session_uuid, const QString& role, const QString& content,
                                    MessageCallback cb, const QString& provider, const QString& model, int tokens_used,
                                    int response_time_ms) {
+    if (local_only_mode()) {
+        Q_UNUSED(session_uuid);
+        Q_UNUSED(role);
+        Q_UNUSED(content);
+        Q_UNUSED(provider);
+        Q_UNUSED(model);
+        Q_UNUSED(tokens_used);
+        Q_UNUSED(response_time_ms);
+        cb(false, {}, {}, local_only_error());
+        return;
+    }
+
     LOG_INFO("ChatModeService", QString("Saving %1 message to session %2").arg(role, session_uuid));
     QJsonObject body;
     body["role"] = role;
@@ -267,6 +326,11 @@ void ChatModeService::save_message(const QString& session_uuid, const QString& r
 // ── Session utilities ─────────────────────────────────────────────────────────
 
 void ChatModeService::get_stats(StatsCallback cb) {
+    if (local_only_mode()) {
+        cb(true, {}, {});
+        return;
+    }
+
     get("/chat/stats", [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
         if (!ok) {
             cb(false, {}, err);
@@ -278,6 +342,12 @@ void ChatModeService::get_stats(StatsCallback cb) {
 }
 
 void ChatModeService::search_messages(const QString& query, SearchCallback cb) {
+    if (local_only_mode()) {
+        Q_UNUSED(query);
+        cb(true, {}, {});
+        return;
+    }
+
     const QString path =
         QString("/chat/search?query=%1&limit=20").arg(QString::fromUtf8(QUrl::toPercentEncoding(query)));
     get(path, [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
@@ -313,6 +383,12 @@ void ChatModeService::bulk_delete_sessions(const QStringList& uuids, VoidCallbac
 }
 
 void ChatModeService::export_sessions(const QStringList& uuids, std::function<void(bool, QJsonArray, QString)> cb) {
+    if (local_only_mode()) {
+        Q_UNUSED(uuids);
+        cb(true, {}, {});
+        return;
+    }
+
     QJsonObject body;
     QJsonArray arr;
     for (const auto& u : uuids)
@@ -332,6 +408,13 @@ void ChatModeService::export_sessions(const QStringList& uuids, std::function<vo
 // ── Optimize prompt ───────────────────────────────────────────────────────────
 
 void ChatModeService::optimize_prompt(const QString& prompt, const QString& mode, OptimizeCallback cb) {
+    if (local_only_mode()) {
+        Q_UNUSED(prompt);
+        Q_UNUSED(mode);
+        cb(false, {}, local_only_error());
+        return;
+    }
+
     LOG_INFO("ChatModeService", QString("Optimizing prompt (%1): \"%2\"").arg(mode, prompt.left(60)));
     QJsonObject body;
     body["prompt"] = prompt;
@@ -404,6 +487,16 @@ void ChatModeService::optimize_prompt(const QString& prompt, const QString& mode
 
 void ChatModeService::agent_chat(const QString& query, const QString& session_id, StreamMode mode, AgentChatCallback cb,
                                  const QString& source, bool auto_approve) {
+    if (local_only_mode()) {
+        Q_UNUSED(query);
+        Q_UNUSED(session_id);
+        Q_UNUSED(mode);
+        Q_UNUSED(source);
+        Q_UNUSED(auto_approve);
+        cb(false, {}, local_only_error());
+        return;
+    }
+
     LOG_INFO("ChatModeService",
              QString("Agent chat [%1]: \"%2\"").arg(mode == StreamMode::Deep ? "deep" : "lite", query.left(60)));
 
@@ -464,6 +557,11 @@ void ChatModeService::agent_chat(const QString& query, const QString& session_id
 // ── Agent memory ──────────────────────────────────────────────────────────────
 
 void ChatModeService::list_memory(MemoriesCallback cb) {
+    if (local_only_mode()) {
+        cb(true, {}, {});
+        return;
+    }
+
     get("/chat/agent/memory", [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
         if (!ok) {
             cb(false, {}, err);
@@ -497,6 +595,11 @@ void ChatModeService::clear_all_memory(VoidCallback cb) {
 // ── Agent schedules ───────────────────────────────────────────────────────────
 
 void ChatModeService::list_schedules(SchedulesCallback cb) {
+    if (local_only_mode()) {
+        cb(true, {}, {});
+        return;
+    }
+
     get("/chat/agent/schedules", [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
         if (!ok) {
             cb(false, {}, err);
@@ -545,6 +648,11 @@ void ChatModeService::resume_schedule(const QString& schedule_id, VoidCallback c
 // ── Agent tasks ───────────────────────────────────────────────────────────────
 
 void ChatModeService::list_tasks(TasksCallback cb) {
+    if (local_only_mode()) {
+        cb(true, {}, {});
+        return;
+    }
+
     get("/chat/agent/tasks?limit=50", [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
         if (!ok) {
             cb(false, {}, err);
@@ -634,6 +742,13 @@ void ChatModeService::get_task_activity(const QString& task_id, ActivityCallback
 // ── Task activity SSE stream ──────────────────────────────────────────────────
 
 QNetworkReply* ChatModeService::stream_task_activity(const QString& task_id, int after_id) {
+    if (local_only_mode()) {
+        Q_UNUSED(task_id);
+        Q_UNUSED(after_id);
+        emit task_activity_done();
+        return nullptr;
+    }
+
     abort_task_activity_stream();
 
     const QString path = QString("/chat/agent/tasks/%1/activity/stream?after_id=%2").arg(task_id).arg(after_id);
@@ -696,6 +811,11 @@ void ChatModeService::handle_task_sse_line(const QByteArray& line) {
 // ── Credits ──────────────────────────────────────────────────────────────────
 
 void ChatModeService::get_credits(CreditsCallback cb) {
+    if (local_only_mode()) {
+        cb(true, 0, {});
+        return;
+    }
+
     const QString path = QString("/user/profile?_t=%1").arg(QDateTime::currentMSecsSinceEpoch());
     get(path, [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
         if (!ok) {
@@ -711,6 +831,13 @@ void ChatModeService::get_credits(CreditsCallback cb) {
 
 void ChatModeService::register_terminal_tools(const QJsonArray& tools, const QString& version, int tool_count,
                                               RegisterCallback cb) {
+    if (local_only_mode()) {
+        Q_UNUSED(tools);
+        Q_UNUSED(version);
+        cb(true, 0, {});
+        return;
+    }
+
     LOG_INFO("ChatModeService", QString("Registering %1 terminal tools (v%2)").arg(tool_count).arg(version));
     QJsonObject body;
     body["tools"] = tools;
@@ -727,6 +854,12 @@ void ChatModeService::register_terminal_tools(const QJsonArray& tools, const QSt
 }
 
 void ChatModeService::poll_pending_calls(PendingCallsCallback cb, int limit) {
+    if (local_only_mode()) {
+        Q_UNUSED(limit);
+        cb(true, {}, {});
+        return;
+    }
+
     const QString path = QString("/chat/agent/terminal-tools/pending?limit=%1").arg(limit);
     get(path, [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
         if (!ok) {
@@ -748,6 +881,11 @@ void ChatModeService::submit_tool_result(const QString& call_id, const QJsonObje
 // ── MCP servers ───────────────────────────────────────────────────────────────
 
 void ChatModeService::list_mcp_servers(McpServersCallback cb) {
+    if (local_only_mode()) {
+        cb(true, {}, 0, {});
+        return;
+    }
+
     get("/chat/agent/mcp/servers", [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
         if (!ok) {
             cb(false, {}, 0, err);
@@ -806,6 +944,11 @@ void ChatModeService::refresh_mcp_servers(McpServersCallback cb) {
 // ── Agent monitors ────────────────────────────────────────────────────────────
 
 void ChatModeService::list_monitors(MonitorsCallback cb) {
+    if (local_only_mode()) {
+        cb(true, {}, {});
+        return;
+    }
+
     get("/chat/agent/monitors", [cb = std::move(cb)](bool ok, QJsonDocument doc, QString err) {
         if (!ok) {
             cb(false, {}, err);
@@ -861,6 +1004,17 @@ void ChatModeService::resume_monitor(const QString& monitor_id, VoidCallback cb)
 
 QNetworkReply* ChatModeService::stream_message(const QString& message, const QString& session_id, StreamMode mode,
                                                const QString& source, bool auto_approve, int profile_id) {
+    if (local_only_mode()) {
+        Q_UNUSED(message);
+        Q_UNUSED(session_id);
+        Q_UNUSED(mode);
+        Q_UNUSED(source);
+        Q_UNUSED(auto_approve);
+        Q_UNUSED(profile_id);
+        emit stream_error(local_only_error());
+        return nullptr;
+    }
+
     LOG_INFO("ChatModeService", QString("Streaming message to session %1 [%2]: \"%3\"")
                                     .arg(session_id)
                                     .arg(mode == StreamMode::Deep ? "deep" : "lite")

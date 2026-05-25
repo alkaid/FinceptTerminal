@@ -13,6 +13,11 @@ SessionGuard::SessionGuard(QObject* parent) : QObject(parent) {
     connect(&timer_, &QTimer::timeout, this, &SessionGuard::check_pulse);
 
     connect(&AuthManager::instance(), &AuthManager::auth_state_changed, this, [this]() {
+        if (AuthManager::instance().is_local_only_mode()) {
+            stop();
+            return;
+        }
+
         const auto& s = AuthManager::instance().session();
         if (s.authenticated && !s.api_key.isEmpty()) {
             start();
@@ -23,6 +28,9 @@ SessionGuard::SessionGuard(QObject* parent) : QObject(parent) {
 }
 
 void SessionGuard::start() {
+    if (AuthManager::instance().is_local_only_mode())
+        return;
+
     if (timer_.isActive())
         return;
     // Do NOT pulse synchronously here. On startup the PIN gate routes the
@@ -41,6 +49,9 @@ void SessionGuard::stop() {
 }
 
 void SessionGuard::check_pulse() {
+    if (AuthManager::instance().is_local_only_mode())
+        return;
+
     const auto& s = AuthManager::instance().session();
     if (!s.authenticated || s.api_key.isEmpty())
         return;

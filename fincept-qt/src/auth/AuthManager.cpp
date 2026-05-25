@@ -14,6 +14,7 @@
 #include <QJsonDocument>
 #include <QRandomGenerator>
 #include <QSysInfo>
+#include <cstdlib>
 
 namespace fincept::auth {
 
@@ -23,6 +24,14 @@ AuthManager& AuthManager::instance() {
 }
 
 AuthManager::AuthManager() {}
+
+bool AuthManager::is_local_only_mode() const {
+    const char* raw = std::getenv("FINCEPT_LOCAL_ONLY");
+    if (!raw)
+        return false;
+    const QString v = QString::fromUtf8(raw).trimmed().toLower();
+    return v == "1" || v == "true" || v == "yes" || v == "on";
+}
 
 void AuthManager::set_loading(bool v) {
     if (is_loading_ != v) {
@@ -67,6 +76,9 @@ static void clear_tokens() {
 // ── Session persistence (SQLite via SettingsRepository) ──────────────────────
 
 void AuthManager::save_session() {
+    if (is_local_only_mode())
+        return;
+
     QJsonDocument doc(session_.to_json());
     QString json = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
     auto r = fincept::SettingsRepository::instance().set("fincept_session", json, "auth");
@@ -125,6 +137,8 @@ void AuthManager::clear_session() {
 }
 
 bool AuthManager::needs_pin_setup() const {
+    if (is_local_only_mode())
+        return false;
     return session_.authenticated && !PinManager::instance().has_pin();
 }
 
@@ -132,6 +146,14 @@ bool AuthManager::needs_pin_setup() const {
 
 void AuthManager::initialize() {
     set_loading(true);
+
+    if (is_local_only_mode()) {
+        configure_local_guest_session();
+        set_loading(false);
+        emit auth_state_changed();
+        return;
+    }
+
     load_session();
 
     if (!session_.api_key.isEmpty()) {
@@ -151,6 +173,34 @@ void AuthManager::initialize() {
     emit auth_state_changed();
 }
 
+void AuthManager::configure_local_guest_session() {
+    session_ = SessionData{};
+    clear_tokens();
+    session_.authenticated = true;
+    session_.api_key = QStringLiteral("local-only");
+    session_.device_id = generate_device_id();
+    session_.has_subscription = true;
+    session_.user_info.username = QStringLiteral("local");
+    session_.user_info.email = QStringLiteral("local@fincept.local");
+    session_.user_info.account_type = QStringLiteral("local");
+    session_.user_info.is_verified = true;
+    session_.subscription.account_type = QStringLiteral("local");
+    session_.subscription.support_type = QStringLiteral("local");
+    LOG_WARN("Auth", "FINCEPT_LOCAL_ONLY enabled — using local guest session without Fincept API authentication");
+}
+
+void AuthManager::continue_as_guest() {
+    if (!is_local_only_mode()) {
+        emit login_failed("Guest mode is only available when FINCEPT_LOCAL_ONLY=1 is set.");
+        return;
+    }
+    set_loading(true);
+    configure_local_guest_session();
+    set_loading(false);
+    emit login_succeeded();
+    emit auth_state_changed();
+}
+
 void AuthManager::validate_saved_session() {
     // Validate the saved api_key by fetching the user profile.
     // We intentionally do NOT send X-Session-Token here — the api_key is
@@ -165,6 +215,15 @@ void AuthManager::validate_saved_session() {
 }
 
 void AuthManager::fetch_user_profile(std::function<void()> on_done) {
+    if (is_local_only_mode()) {
+        if (!session_.authenticated)
+            configure_local_guest_session();
+        set_loading(false);
+        if (on_done)
+            on_done();
+        return;
+    }
+
     AuthApi::instance().get_user_profile([this, on_done = std::move(on_done)](ApiResponse r) mutable {
         if (!r.success && (r.status_code == 401 || r.status_code == 403)) {
             // API key is revoked or invalid — force re-login
@@ -203,6 +262,16 @@ void AuthManager::fetch_user_profile(std::function<void()> on_done) {
 // Used by login / verify_otp / verify_mfa / session restore.
 
 void AuthManager::complete_auth_flow(std::function<void()> on_done) {
+    if (is_local_only_mode()) {
+        if (!session_.authenticated)
+            configure_local_guest_session();
+        set_loading(false);
+        if (on_done)
+            on_done();
+        emit auth_state_changed();
+        return;
+    }
+
     UserApi::instance().get_user_subscription([this, on_done = std::move(on_done)](ApiResponse r) {
         if (r.success) {
             const auto sub_data = unwrap_data(r.data);
@@ -425,6 +494,14 @@ void AuthManager::logout() {
         return;
     is_logging_out_ = true;
 
+    if (is_local_only_mode()) {
+        configure_local_guest_session();
+        is_logging_out_ = false;
+        emit logged_out();
+        emit auth_state_changed();
+        return;
+    }
+
     if (!session_.api_key.isEmpty()) {
         AuthApi::instance().logout([](ApiResponse) {});
     }
@@ -443,6 +520,12 @@ void AuthManager::logout() {
 // If api_key is also invalid → truly expired, must re-login.
 
 void AuthManager::attempt_session_recovery(std::function<void(bool)> cb) {
+    if (is_local_only_mode()) {
+        if (cb)
+            cb(true);
+        return;
+    }
+
     if (session_.api_key.isEmpty()) {
         if (cb)
             cb(false);
@@ -489,6 +572,13 @@ void AuthManager::attempt_session_recovery(std::function<void(bool)> cb) {
 // ── Refresh user data ────────────────────────────────────────────────────────
 
 void AuthManager::refresh_user_data() {
+    if (is_local_only_mode()) {
+        if (!session_.authenticated)
+            configure_local_guest_session();
+        emit subscription_fetched();
+        return;
+    }
+
     if (!session_.authenticated || session_.api_key.isEmpty())
         return;
     // fetch_user_profile chains into fetch_user_subscription automatically
@@ -498,6 +588,9 @@ void AuthManager::refresh_user_data() {
 // ── Auto-configure Fincept LLM provider ──────────────────────────────────────
 
 void AuthManager::auto_configure_fincept_llm() {
+    if (is_local_only_mode())
+        return;
+
     if (session_.api_key.isEmpty())
         return;
 

@@ -224,7 +224,7 @@ struct SessionData {
 
     bool has_paid_plan() const {
         const QString at = account_type().toLower();
-        return at == "basic" || at == "standard" || at == "pro" || at == "enterprise";
+        return at == "basic" || at == "standard" || at == "pro" || at == "enterprise" || at == "local";
     }
 
     QJsonObject to_json() const {

@@ -49,6 +49,17 @@ void WindowFrame::on_auth_state_changed() {
         return;
 
     if (auth.is_authenticated()) {
+        if (auth.is_local_only_mode()) {
+            locked_ = false;
+            pin_gate_cleared_ = true;
+            auth::InactivityGuard::instance().set_enabled(false);
+            auth::InactivityGuard::instance().set_terminal_locked(false);
+            set_shell_visible(true);
+            stack_->setCurrentIndex(1);
+            layout::WorkspaceShell::load_last_or_default();
+            return;
+        }
+
         // Don't redirect if user is already on the app stack (dashboard/workspace
         // at index 1, or chat mode at index 2) — UNLESS the PIN gate hasn't been
         // cleared yet (auth completed while loading state showed dashboard early).

@@ -32,6 +32,7 @@ class LoginScreen : public QWidget {
     QLineEdit* email_input_ = nullptr;
     QLineEdit* password_input_ = nullptr;
     QPushButton* login_btn_ = nullptr;
+    QPushButton* guest_btn_ = nullptr;
     QPushButton* forgot_btn_ = nullptr;
     QPushButton* show_pw_btn_ = nullptr;
     QLabel* no_account_lbl_ = nullptr;
@@ -80,6 +81,7 @@ class LoginScreen : public QWidget {
 
   private slots:
     void on_login();
+    void on_continue_as_guest();
     void on_mfa_verify();
     void on_force_login();
     void on_login_succeeded();

@@ -167,6 +167,36 @@ static void strip_unmanaged_credentials(QProcessEnvironment& env,
     }
 }
 
+static void strip_qt_runtime_library_paths(QProcessEnvironment& env) {
+#ifdef Q_OS_LINUX
+    const QString raw = env.value(QStringLiteral("LD_LIBRARY_PATH"));
+    if (raw.isEmpty())
+        return;
+
+    const QString app_dir = QCoreApplication::applicationDirPath();
+    QStringList kept;
+    for (const QString& part : raw.split(QLatin1Char(':'), Qt::KeepEmptyParts)) {
+        const QString clean = QDir::cleanPath(part);
+        if (clean.isEmpty())
+            continue;
+
+        // The desktop binary may be launched with repo-bundled Qt libs on
+        // LD_LIBRARY_PATH. Python packages such as yfinance/curl_cffi must not
+        // inherit those, or TLS can bind against incompatible OpenSSL libs.
+        if ((clean.contains(QStringLiteral("/.qt/")) && clean.contains(QStringLiteral("/gcc_64/lib"))) ||
+            (clean.startsWith(app_dir) && clean.contains(QStringLiteral("/Qt")))) {
+            continue;
+        }
+        kept.append(part);
+    }
+
+    if (kept.isEmpty())
+        env.remove(QStringLiteral("LD_LIBRARY_PATH"));
+    else
+        env.insert(QStringLiteral("LD_LIBRARY_PATH"), kept.join(QLatin1Char(':')));
+#endif
+}
+
 // Scripts that require NumPy 1.x environment
 static const QStringList kNumpy1Scripts = {
     "vectorbt", "backtesting", "gluonts", "functime", "pyportfolioopt", "financepy", "ffn", "ffn_wrapper",
@@ -211,6 +241,8 @@ QString PythonRunner::scripts_dir() const {
 // here. Script-specific path additions (parent-of-pkg) stay in run().
 QProcessEnvironment PythonRunner::build_python_env() const {
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    strip_qt_runtime_library_paths(env);
+
     env.insert("PYTHONIOENCODING", "utf-8");
     env.insert("PYTHONDONTWRITEBYTECODE", "1");
     env.insert("PYTHONUNBUFFERED", "1");

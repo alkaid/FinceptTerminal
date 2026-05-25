@@ -294,6 +294,14 @@ void LoginScreen::build_login_page() {
     brl->addWidget(login_btn_);
     vl->addWidget(btn_row);
 
+    if (auth::AuthManager::instance().is_local_only_mode()) {
+        guest_btn_ = new QPushButton;
+        guest_btn_->setFixedHeight(32);
+        guest_btn_->setStyleSheet(btn_standard());
+        connect(guest_btn_, &QPushButton::clicked, this, &LoginScreen::on_continue_as_guest);
+        vl->addWidget(guest_btn_);
+    }
+
     vl->addWidget(make_separator());
 
     // Register link
@@ -482,6 +490,7 @@ void LoginScreen::retranslateUi() {
     }
     if (forgot_btn_)      forgot_btn_->setText(tr("FORGOT PASSWORD?"));
     if (login_btn_)       login_btn_->setText(tr("  SIGN IN  "));
+    if (guest_btn_)       guest_btn_->setText(tr("  CONTINUE AS GUEST  "));
     if (no_account_lbl_)  no_account_lbl_->setText(tr("No account?"));
     if (signup_btn_)      signup_btn_->setText(tr("SIGN UP"));
 
@@ -517,6 +526,12 @@ void LoginScreen::on_login() {
     clear_error();
     set_loading(true);
     auth::AuthManager::instance().login(email, password);
+}
+
+void LoginScreen::on_continue_as_guest() {
+    clear_error();
+    set_loading(true);
+    auth::AuthManager::instance().continue_as_guest();
 }
 
 void LoginScreen::on_mfa_verify() {
@@ -595,6 +610,8 @@ void LoginScreen::clear_error() {
 
 void LoginScreen::set_loading(bool loading) {
     login_btn_->setEnabled(!loading);
+    if (guest_btn_)
+        guest_btn_->setEnabled(!loading);
     email_input_->setEnabled(!loading);
     password_input_->setEnabled(!loading);
     login_btn_->setText(loading ? tr("  SIGNING IN...  ") : tr("  SIGN IN  "));

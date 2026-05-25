@@ -105,16 +105,36 @@ void LlmService::ensure_config() const {
         }
     }
 
+    const bool local_only = fincept::auth::AuthManager::instance().is_local_only_mode();
+
     // Nothing configured — default to Fincept with the session key.
     if (provider_.isEmpty()) {
-        provider_ = "fincept";
+        if (local_only) {
+            provider_ = "ollama";
+            model_ = "llama3.1";
+            base_url_ = "http://localhost:11434";
+            LOG_INFO(kLlmSvcTag, "No LLM provider configured — using local Ollama default");
+        } else {
+            provider_ = "fincept";
+            model_ = "MiniMax-M2.7";
+            base_url_ = {};
+            LOG_INFO(kLlmSvcTag, "No LLM provider configured — using Fincept default");
+        }
+    } else if (local_only && provider_ == "fincept") {
+        provider_ = "ollama";
+        api_key_.clear();
+        model_ = "llama3.1";
+        base_url_ = "http://localhost:11434";
+        LOG_INFO(kLlmSvcTag, "FINCEPT_LOCAL_ONLY enabled — using local Ollama instead of Fincept LLM");
+    }
+
+    if (!local_only && provider_ == "fincept" && model_ == "fincept-llm") {
         model_ = "MiniMax-M2.7";
         base_url_ = {};
-        LOG_INFO(kLlmSvcTag, "No LLM provider configured — using Fincept default");
     }
 
     // Fincept key always comes from the live AuthManager session; SettingsRepository fallback is the legacy path.
-    if (provider_ == "fincept") {
+    if (!local_only && provider_ == "fincept") {
         const auto& sess = fincept::auth::AuthManager::instance().session();
         if (!sess.api_key.isEmpty()) {
             api_key_ = sess.api_key;

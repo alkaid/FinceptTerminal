@@ -848,6 +848,8 @@ WindowFrame::WindowFrame(int window_id, QWidget* parent, const WindowId& adopted
     user_refresh_timer_->setInterval(3 * 60 * 1000);
     connect(user_refresh_timer_, &QTimer::timeout, this, []() {
         auto& auth = auth::AuthManager::instance();
+        if (auth.is_local_only_mode())
+            return;
         if (!auth.is_authenticated())
             return;
         if (auth::InactivityGuard::instance().is_terminal_locked())
@@ -861,6 +863,10 @@ WindowFrame::WindowFrame(int window_id, QWidget* parent, const WindowId& adopted
     connect(qApp, &QApplication::applicationStateChanged, this, [](Qt::ApplicationState state) {
         if (state == Qt::ApplicationActive) {
             auto& auth = auth::AuthManager::instance();
+            if (auth.is_local_only_mode()) {
+                auth::InactivityGuard::instance().check_for_resume_lock();
+                return;
+            }
             // Skip refresh while locked — same reason as the periodic
             // timer above. check_for_resume_lock() below still runs so
             // a wall-clock-elapsed lock fires immediately on wake.
